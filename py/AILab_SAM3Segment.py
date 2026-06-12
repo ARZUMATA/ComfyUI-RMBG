@@ -104,8 +104,16 @@ def _resolve_device(user_choice):
     return auto_device
 
 
+# Save the original pristine state before importing
+_original_comfy_tf32 = torch.backends.cuda.matmul.allow_tf32
+
+try:
+    # Run the actual imports causing the issue
 from sam3.model_builder import build_sam3_image_model  # noqa: E402
 from sam3.model.sam3_image_processor import Sam3Processor  # noqa: E402
+finally:
+    # Forcefully override the environment back to the clean ComfyUI setup
+    torch.backends.cuda.matmul.allow_tf32 = _original_comfy_tf32
 
 
 class SAM3Segment:
@@ -256,6 +264,13 @@ class SAM3Segment:
         return result_image, mask_tensor, mask_rgb
 
     def segment(self, image, prompt, device, confidence_threshold=0.5, max_segments=0, segment_pick=0, mask_blur=0, mask_offset=0, invert_output=False, unload_model=False, background="Alpha", background_color="#222222", output_mode="Merged"):
+        # Capture original tf32 state before SAM3 can mess with it
+        original_tf32 = torch.backends.cuda.matmul.allow_tf32
+
+        try:
+            # Invert it to True so SAM3 doesn't break or crash
+            torch.backends.cuda.matmul.allow_tf32 = True
+
         if image.ndim == 3:
             image = image.unsqueeze(0)
         processor, torch_device = self._load_processor(device)
@@ -327,6 +342,9 @@ class SAM3Segment:
         
         return final_images, final_masks, final_mask_images
 
+        finally:
+            # Force GPU back to original tf32 state configuration the millisecond SAM3 finishes
+            torch.backends.cuda.matmul.allow_tf32 = original_tf32
 
 NODE_CLASS_MAPPINGS = {"SAM3Segment": SAM3Segment}
 NODE_DISPLAY_NAME_MAPPINGS = {"SAM3Segment": "SAM3 Segmentation (RMBG)"}
